@@ -1,0 +1,199 @@
+/* ── Design Tokens ─────────────────────────────────────────────────────────── */
+:root {
+  /* Background layers — darkest to lightest */
+  --bg-base: #0f1015;
+  /* Page background */
+  --bg-surface: #16181f;
+  /* Card / panel surface */
+  --bg-elevated: #1e2029;
+  /* Elevated elements, inputs */
+  --bg-hover: #252832;
+  /* Hover state */
+
+  /* Borders */
+  --border-subtle: #2a2d38;
+  /* Faint dividers */
+  --border-default: #363a49;
+  /* Default card borders */
+  --border-strong: #4a4f63;
+  /* Emphasis borders */
+
+  /* Text */
+  --text-primary: #e8eaf0;
+  /* Main readable text */
+  --text-secondary: #8b90a6;
+  /* Muted labels */
+  --text-tertiary: #555a70;
+  /* Very muted hints */
+
+  /* Accent — amber/gold, the one bold color in the palette */
+  --accent: #f0a500;
+  --accent-dim: #c4860020;
+  /* Transparent version for bg fills */
+  --accent-border: #c4860050;
+
+  /* Semantic */
+  --success: #34c77b;
+  --success-dim: #34c77b18;
+  --error: #f05252;
+  --error-dim: #f0525218;
+  --warning: #f0a500;
+  --info: #5b8af0;
+  --info-dim: #5b8af018;
+
+  /* Typography */
+  --font-ui: "DM Sans", sans-serif;
+  --font-mono: "IBM Plex Mono", monospace;
+
+  /* Spacing scale */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+  --space-10: 40px;
+
+  /* Radius */
+  --radius-sm: 6px;
+  --radius-md: 10px;
+  --radius-lg: 14px;
+}
+
+/* ── Reset ──────────────────────────────────────────────────────────────────── */
+*,
+*::before,
+*::after {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html {
+  font-size: 15px;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  font-family: var(--font-ui);
+  background: var(--bg-base);
+  color: var(--text-primary);
+  line-height: 1.6;
+  min-height: 100vh;
+}
+
+#root {
+  min-height: 100vh;
+}
+
+/* ── Typography ─────────────────────────────────────────────────────────────── */
+h1,
+h2,
+h3,
+h4 {
+  font-family: var(--font-ui);
+  font-weight: 600;
+  line-height: 1.25;
+  color: var(--text-primary);
+}
+
+/* Mono class — used for numbers, IDs, file sizes */
+.mono {
+  font-family: var(--font-mono);
+}
+
+/* ── Scrollbar ──────────────────────────────────────────────────────────────── */
+::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+
+::-webkit-scrollbar-track {
+  background: var(--bg-surface);
+}
+
+::-webkit-scrollbar-thumb {
+  background: var(--border-strong);
+  border-radius: 3px;
+}
+
+::-webkit-scrollbar-thumb:hover {
+  background: var(--text-tertiary);
+}
+
+/* ── Animations ─────────────────────────────────────────────────────────────── */
+@keyframes fadeUp {
+  from {
+    opacity: 0;
+    transform: translateY(12px);
+  }
+
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+@keyframes shimmer {
+  0% {
+    background-position: -400px 0;
+  }
+
+  100% {
+    background-position: 400px 0;
+  }
+}
+
+@keyframes spin {
+  to {
+    transform: rotate(360deg);
+  }
+}
+
+@keyframes pulse-border {
+
+  0%,
+  100% {
+    border-color: var(--accent-border);
+  }
+
+  50% {
+    border-color: var(--accent);
+  }
+}
+
+.fade-up {
+  animation: fadeUp 0.35s ease both;
+}
+
+/* Staggered entrance delays for stat cards */
+.fade-up-1 {
+  animation: fadeUp 0.35s 0.05s ease both;
+}
+
+.fade-up-2 {
+  animation: fadeUp 0.35s 0.10s ease both;
+}
+
+.fade-up-3 {
+  animation: fadeUp 0.35s 0.15s ease both;
+}
+
+.fade-up-4 {
+  animation: fadeUp 0.35s 0.20s ease both;
+}
+
+/* ── Utility ─────────────────────────────────────────────────────────────────── */
+.sr-only {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  padding: 0;
+  margin: -1px;
+  overflow: hidden;
+  clip: rect(0, 0, 0, 0);
+  white-space: nowrap;
+  border: 0;
+}
