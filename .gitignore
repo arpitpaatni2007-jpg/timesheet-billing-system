@@ -1,0 +1,14 @@
+node_modules/
+dist/
+build/
+
+.env
+.env.local
+.env.*.local
+
+backend/uploads/
+backend/generated-reports/
+
+.DS_Store
+*.log
+coverage/
