@@ -106,60 +106,88 @@ const generateBillingSummary = async (req, res) => {
 // Returns: { success, reportName, path }
 // Also saves the .xlsx to generated-reports/
 // ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 7: POST /api/reports/generate-billing-summary
+// Accepts same two files as /billing-summary, but also writes the Excel file.
+// ─────────────────────────────────────────────────────────────────────────────
+// ─────────────────────────────────────────────────────────────────────────────
+// PHASE 7: POST /api/reports/generate-billing-summary
+//
+// Generates BOTH output files in one request:
+//   1. Client Wise - Timesheet {month}.xlsx   ← intermediate verification workbook
+//   2. Monthly Billing Summary {month}.xlsx   ← final billing output
+//
+// Both files are saved to generated-reports/ and both paths are returned.
+// ─────────────────────────────────────────────────────────────────────────────
 const generateBillingSummaryExcelReport = async (req, res) => {
   try {
-    // ── Validate files ───────────────────────────────────────────────────────
     const timesheetFile = req.files?.["timesheetCsv"]?.[0]  || null;
     const managerFile   = req.files?.["managerReport"]?.[0] || null;
 
     if (!timesheetFile) {
       return res.status(400).json({
         success: false,
-        error: 'Missing file. Send employee CSV with field name "timesheetCsv".'
+        error: 'Send employee CSV with field name "timesheetCsv"'
       });
     }
     if (!managerFile) {
       return res.status(400).json({
         success: false,
-        error: 'Missing file. Send manager Excel with field name "managerReport".'
+        error: 'Send manager Excel with field name "managerReport"'
       });
     }
 
-    // ── Report month ─────────────────────────────────────────────────────────
     let reportMonth = req.body.reportMonth;
     if (!reportMonth) {
       const now = new Date();
       reportMonth = now.toLocaleDateString("en-US", { month: "long", year: "numeric" });
     }
 
-    // ── Step 1: Parse CSV ─────────────────────────────────────────────────────
+    // ── Step 1: Parse the employee CSV once ────────────────────────────────────
     const parsedResult = csvProcessor.processCSV(timesheetFile.path);
     if (!parsedResult?.data?.length) {
-      return res.status(400).json({ success: false, error: "Employee CSV is empty or invalid." });
+      return res.status(400).json({
+        success: false,
+        error: "Employee CSV is empty or invalid."
+      });
     }
 
-    // ── Step 2: Group employee data ───────────────────────────────────────────
+    // ── Step 2: Group employee data (used by BOTH generators) ─────────────────
     const groupedData = groupByClient(parsedResult.data);
 
-    // ── Step 3: Parse manager report ─────────────────────────────────────────
-    const managerData = parseManagerReport(managerFile.path);
+    // ── Step 3: Generate File 1 — Client Wise Timesheet workbook ──────────────
+    // One sheet per client, grouped by Project → Module → Task → Employee.
+    // This is the intermediate verification file the manager reviews first.
+    const timesheetPath = await generateTimesheetExcel(groupedData, reportMonth);
 
-    // ── Step 4: Build merged billing summary ─────────────────────────────────
+    // ── Step 4: Parse manager report and build billing summary ────────────────
+    const managerData    = parseManagerReport(managerFile.path);
     const billingSummary = buildBillingSummary(groupedData, managerData, reportMonth);
 
-    // ── Step 5: Generate Excel workbook ──────────────────────────────────────
-    const savedPath  = await generateBillingSummaryExcel(billingSummary, reportMonth);
-    const reportName = path.basename(savedPath);
+    // ── Step 5: Generate File 2 — Monthly Billing Summary workbook ────────────
+    // Single sheet, one row per project, manager + employees as columns.
+    const billingPath = await generateBillingSummaryExcel(billingSummary, reportMonth);
 
-    // ── Step 6: Return success ────────────────────────────────────────────────
+    // ── Step 6: Return both file names and paths ───────────────────────────────
     return res.status(200).json({
       success     : true,
-      reportName,
       reportMonth,
       totalClients: billingSummary.clients.length,
       grandTotal  : billingSummary.grandTotal,
-      path        : savedPath,
-      message     : `Billing Summary Excel generated: ${reportName}`,
+
+      // File 1 — Client Wise Timesheet
+      timesheetReport: {
+        reportName : path.basename(timesheetPath),
+        path       : timesheetPath,
+      },
+
+      // File 2 — Billing Summary
+      billingSummaryReport: {
+        reportName : path.basename(billingPath),
+        path       : billingPath,
+      },
+
+      message: `Generated 2 reports for ${billingSummary.clients.length} client(s): Timesheet + Billing Summary.`,
     });
 
   } catch (error) {

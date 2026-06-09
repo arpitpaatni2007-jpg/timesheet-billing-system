@@ -86,64 +86,67 @@ async function generateTimesheetExcel(groupedData, reportMonth) {
     // -------------------------------------------------------
     // DATA ROWS: Loop through Projects → Modules → Tasks → Employees
     // -------------------------------------------------------
-
-    let clientTotalHours = 0; // accumulate for the final client total row
+// Track every data row number for each project, so we can write
+    // =SUM(E6:E12) style formulas instead of hardcoded totals.
+    // This means if anyone edits a cell manually, totals recalculate.
+    const allDataRowNumbers = []; // collects every employee row number
 
     for (const project of client.projects) {
 
-      let projectTotalHours = 0; // accumulate for project subtotal row
+      const projectDataRowNumbers = []; // employee rows for this project only
 
       for (const mod of project.modules) {
         for (const task of mod.tasks) {
           for (const emp of task.employees) {
 
-            // Add one data row per employee entry
             const dataRow = sheet.addRow([
-              project.projectName,       // Column A
-              mod.moduleName,            // Column B
-              task.taskName,             // Column C
-              emp.employeeName,          // Column D
-              emp.totalHours,            // Column E
-              ""                         // Column F (Notes — blank for now)
+              project.projectName,
+              mod.moduleName,
+              task.taskName,
+              emp.employeeName,
+              emp.totalHours,  // raw value written here (not a formula)
+              ""
             ]);
 
-            // Style the data row (borders, number format for hours)
             styleDataRow(dataRow);
 
-            projectTotalHours += emp.totalHours;
+            projectDataRowNumbers.push(dataRow.number);
+            allDataRowNumbers.push(dataRow.number);
           }
         }
       }
 
-      // -------------------------------------------------------
-      // PROJECT SUBTOTAL ROW
-      // -------------------------------------------------------
+      // PROJECT SUBTOTAL — =SUM of this project's employee rows in col E
+      // If rows are not contiguous (spacers between projects), we join with +
+      // But since rows ARE contiguous per project, a range SUM is safe.
+      const projFirstRow = projectDataRowNumbers[0];
+      const projLastRow  = projectDataRowNumbers[projectDataRowNumbers.length - 1];
       const projectTotalRow = sheet.addRow([
-        `Total – ${project.projectName}`, // Column A
-        "", "", "",                        // B, C, D blank
-        roundHours(projectTotalHours),     // Column E
+        `Total – ${project.projectName}`,
+        "", "", "",
+        { formula: `SUM(E${projFirstRow}:E${projLastRow})` },  // ← formula
         ""
       ]);
       styleProjectTotalRow(projectTotalRow);
       sheet.mergeCells(`A${projectTotalRow.number}:D${projectTotalRow.number}`);
 
-      // Blank spacer after each project
-      sheet.addRow([]);
-
-      clientTotalHours += projectTotalHours;
+      sheet.addRow([]); // blank spacer
     }
 
-    // -------------------------------------------------------
-    // CLIENT GRAND TOTAL ROW
-    // -------------------------------------------------------
+    // CLIENT GRAND TOTAL — =SUM of ALL employee rows in col E for this sheet
+    // We list each project subtotal row's formula refs OR sum all data rows.
+    // Summing all data rows directly is simpler and equally correct.
+    const clientFirstRow = allDataRowNumbers[0];
+    const clientLastRow  = allDataRowNumbers[allDataRowNumbers.length - 1];
     const clientTotalRow = sheet.addRow([
       `TOTAL BILLABLE HOURS – ${client.clientName.toUpperCase()}`,
       "", "", "",
-      roundHours(clientTotalHours),
+      { formula: `SUM(E${clientFirstRow}:E${clientLastRow})` },  // ← formula
       ""
     ]);
     styleClientTotalRow(clientTotalRow);
     sheet.mergeCells(`A${clientTotalRow.number}:D${clientTotalRow.number}`);
+    
 
     // -------------------------------------------------------
     // COLUMN WIDTHS (auto-size by setting fixed widths)
@@ -202,7 +205,7 @@ function styleDataRow(row) {
 
     // Format the Hours column (column 5) as a number with 2 decimal places
     if (colNumber === 5) {
-      cell.numFmt    = "0.00";
+      cell.numFmt    = "0.##";
       cell.alignment = { horizontal: "center", vertical: "middle" };
     }
   });
@@ -218,7 +221,7 @@ function styleProjectTotalRow(row) {
     cell.alignment = { vertical: "middle" };
 
     if (colNumber === 5) {
-      cell.numFmt    = "0.00";
+      cell.numFmt    = "0.##";
       cell.alignment = { horizontal: "center", vertical: "middle" };
     }
   });
@@ -234,7 +237,7 @@ function styleClientTotalRow(row) {
     cell.alignment = { vertical: "middle" };
 
     if (colNumber === 5) {
-      cell.numFmt    = "0.00";
+      cell.numFmt    = "0.##";
       cell.alignment = { horizontal: "center", vertical: "middle" };
     }
   });

@@ -155,29 +155,40 @@ function buildBillingSummary(groupedData, managerReport, reportPeriod) {
 
     // ── Build per-project breakdown ──────────────────────────────────────────
     const projectSummaries = [];
-
     if (employeeClient && employeeClient.projects) {
       for (const project of employeeClient.projects) {
 
         // Employee breakdown: who worked on this project and how many hours
         const employeeBreakdown = getEmployeeBreakdown(project);
-        const projectEmployeeHours = roundHours(
+
+        // ── CHANGE: Inject manager as an employee on the FIRST project only ──
+        // Manager hours are tracked at client level (not per-project in the
+        // manager's time report). We assign all of them to the first project
+        // so the billing summary row shows the manager alongside employees.
+        // On subsequent projects of the same client, manager hours = 0 (already spent).
+        const isFirstProject = projectSummaries.length === 0;
+        if (isFirstProject && managerHoursForClient > 0) {
+          employeeBreakdown.push({
+            employeeName : managerName,   // e.g. "Nishant Rajvanshi"
+            hours        : roundHours(managerHoursForClient),
+            isManager    : true,          // flag so Excel generator can apply gray fill
+          });
+        }
+        // ── END CHANGE ──
+
+        const projectTotalHours = roundHours(
           employeeBreakdown.reduce((s, e) => s + e.hours, 0)
         );
 
-        // Manager hours: proportionally attributed to this project
-        // (since manager entries are at client level, we show all manager entries
-        //  on the first project, or you can show 0 per project and total at client level)
-        // We store manager entries at client level, not per-project.
         const workSummaryTasks = extractWorkSummary(project);
 
         projectSummaries.push({
-          projectName        : project.projectName,
-          employeeHours      : projectEmployeeHours,
-          managerHours       : 0,  // shown at client level, not per project
-          totalHours         : projectEmployeeHours, // manager shown separately
+          projectName       : project.projectName,
+          employeeHours     : roundHours(project.totalHours || 0),
+          managerHours      : isFirstProject ? roundHours(managerHoursForClient) : 0,
+          totalHours        : projectTotalHours,
           employeeBreakdown,
-          modules            : project.modules.map(mod => ({
+          modules           : project.modules.map(mod => ({
             moduleName  : mod.moduleName,
             totalHours  : mod.totalHours,
             tasks       : mod.tasks.map(task => ({
@@ -190,6 +201,26 @@ function buildBillingSummary(groupedData, managerReport, reportPeriod) {
         });
       }
     }
+
+    // If manager has entries but NO employee timesheet projects exist for this
+    // client, create a single manager-only row so hours are not lost
+    if (projectSummaries.length === 0 && managerHoursForClient > 0) {
+      projectSummaries.push({
+        projectName       : `${clientName} – Manager Oversight`,
+        employeeHours     : 0,
+        managerHours      : roundHours(managerHoursForClient),
+        totalHours        : roundHours(managerHoursForClient),
+        employeeBreakdown : [{
+          employeeName : managerName,
+          hours        : roundHours(managerHoursForClient),
+          isManager    : true,
+        }],
+        modules     : [],
+        workSummary : [],
+      });
+    }
+ 
+    
 
     // Add a special "Manager Effort" pseudo-project if manager has entries
     // but the client has no employee timesheet projects

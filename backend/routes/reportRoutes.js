@@ -44,6 +44,8 @@ router.post(
 // ── Phase 7 ──────────────────────────────────────────────────────────────
 // POST /api/reports/generate-billing-summary
 // Same two files as billing-summary, returns a downloadable .xlsx
+// Phase 7: POST /api/reports/generate-billing-summary
+// Two files: timesheetCsv + managerReport → writes .xlsx and returns path
 router.post(
   "/generate-billing-summary",
   upload.fields([
@@ -52,5 +54,4 @@ router.post(
   ]),
   generateBillingSummaryExcelReport
 );
-
 module.exports = router;
