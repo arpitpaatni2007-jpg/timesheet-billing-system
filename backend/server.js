@@ -4,6 +4,8 @@
 
 const express = require("express");
 const cors = require("cors");
+const path = require("path");
+const fs = require("fs");
 const app = express();
 
 app.use(
@@ -16,6 +18,17 @@ app.use(
 
 app.use(express.json());
 app.use(express.urlencoded({ extended: true }));
+const REQUIRED_DIRS = [
+  path.join(__dirname, "uploads"),
+  path.join(__dirname, "generated-reports"),
+];
+
+for (const dir of REQUIRED_DIRS) {
+  if (!fs.existsSync(dir)) {
+    fs.mkdirSync(dir, { recursive: true });
+    console.log(`📁 Created missing directory: ${dir}`);
+  }
+}
 // -------------------------------------------------------
 // IMPORT ROUTES
 // Each route file handles a different group of API endpoints

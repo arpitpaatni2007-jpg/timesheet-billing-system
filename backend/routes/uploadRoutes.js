@@ -11,9 +11,9 @@ const { uploadFile, uploadAndGroup } = require("../controllers/uploadController"
 
 // Configure multer: where to save files and what to name them
 const storage = multer.diskStorage({
-  destination: function (req, file, cb) {
-    cb(null, "uploads/"); // save to uploads/ folder
-  },
+ destination: function (req, file, cb) {
+  cb(null, path.join(__dirname, "../uploads"));
+},
   filename: function (req, file, cb) {
     // Give each file a unique name using timestamp
     const uniqueName = Date.now() + "-" + file.originalname;
