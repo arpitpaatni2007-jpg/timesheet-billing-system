@@ -1,29 +1,26 @@
 // ── pages/Dashboard.jsx ───────────────────────────────────────────────────────
 // The single-page dashboard. Owns all state via hooks.
-// Assembles: UploadZone → ReportStatus → ReportActions → StatsPanel → ReportHistory
-//
-// State flow:
-//   useUpload()  → file state → passed to UploadZone (display) and actions (API calls)
-//   useReports() → API state → passed to ReportActions (loading) and StatsPanel (data)
+// Assembles: UploadZone → ReportStatus → ReportActions → ClientSheetConfig
+//            → StatsPanel → ReportHistory
 
 import React, { useCallback } from "react";
 import useUpload from "../hooks/useUpload";
 import useReports from "../hooks/useReports";
 import UploadZone from "../components/features/UploadZone";
 import ReportActions from "../components/features/ReportActions";
+import ClientSheetConfig from "../components/features/ClientSheetConfig"; // ← NEW
 import StatsPanel from "../components/features/StatsPanel";
 import ReportStatus from "../components/features/ReportStatus";
 import ReportHistory from "../components/features/ReportHistory";
 import { downloadReport, triggerBrowserDownload } from "../api/reports";
 import toast from "react-hot-toast";
 
-// Derive a simple status string from hook state for ReportStatus component
 const deriveStatus = ({ isReady, isGenerating, isDownloading, summaryData, error }) => {
-  if (error)        return "error";
-  if (isGenerating) return "generating";
+  if (error)         return "error";
+  if (isGenerating)  return "generating";
   if (isDownloading) return "downloading";
-  if (summaryData)  return "done";
-  if (isReady)      return "ready";
+  if (summaryData)   return "done";
+  if (isReady)       return "ready";
   return "idle";
 };
 
@@ -31,7 +28,6 @@ const Dashboard = () => {
   const upload  = useUpload();
   const reports = useReports();
 
-  // Derived status string for the ReportStatus pipeline indicator
   const status = deriveStatus({
     isReady:       upload.isReady,
     isGenerating:  reports.isGenerating,
@@ -40,30 +36,24 @@ const Dashboard = () => {
     error:         reports.error,
   });
 
-  // Generate Summary — calls /billing-summary, populates StatsPanel
   const handleGenerate = useCallback(() => {
     reports.generateSummary(upload.employeeFile, upload.managerFile);
   }, [reports, upload.employeeFile, upload.managerFile]);
 
-  // Download Excel — calls /generate-billing-summary, generates both files,
-  // stores both filenames in hook state, auto-downloads billing summary
   const handleDownload = useCallback(() => {
     reports.downloadExcel(upload.employeeFile, upload.managerFile);
   }, [reports, upload.employeeFile, upload.managerFile]);
 
-  // Download Billing Summary by filename — uses existing GET download endpoint
   const handleDownloadBilling = useCallback(() => {
     if (!reports.billingReportName) return;
     triggerBrowserDownload(reports.billingReportName);
   }, [reports.billingReportName]);
 
-  // Download Client Wise Timesheet by filename — uses existing GET download endpoint
   const handleDownloadTimesheet = useCallback(() => {
     if (!reports.timesheetReportName) return;
     triggerBrowserDownload(reports.timesheetReportName);
   }, [reports.timesheetReportName]);
 
-  // Re-download from history — fetches file by name from backend
   const handleHistoryDownload = useCallback(async (filename) => {
     const toastId = toast.loading("Fetching report...");
     try {
@@ -81,7 +71,7 @@ const Dashboard = () => {
       margin:   "0 auto",
       padding:  "0 24px 60px",
     }}>
-      {/* ── Upload + Actions row ──────────────────────────────────────────── */}
+      {/* ── Upload + Actions + Config column ─────────────────────────────── */}
       <div style={{
         display:             "grid",
         gridTemplateColumns: "1fr 340px",
@@ -98,6 +88,7 @@ const Dashboard = () => {
           setManagerFile={upload.setManagerFile}
         />
 
+        {/* Right column: ReportActions + ClientSheetConfig stacked */}
         <div style={{ display: "flex", flexDirection: "column", gap: "16px" }}>
           <ReportActions
             isReady={upload.isReady}
@@ -111,6 +102,9 @@ const Dashboard = () => {
             billingReportName={reports.billingReportName}
             timesheetReportName={reports.timesheetReportName}
           />
+
+          {/* Client sheet configuration panel */}
+          <ClientSheetConfig summaryData={reports.summaryData} />
         </div>
       </div>
 

@@ -1,51 +1,36 @@
 // services/billingSummaryExcelGenerator.js
 //
-// PHASE 7 — Monthly Billing Summary Excel Generator
-//
 // CHANGES IN THIS VERSION:
-//   1. Manager appears as a regular employee column (no separate hardcoded col C/D)
-//   2. Manager column gets gray fill (FFF2F2F2) via isManager flag from builder
-//   3. All totals use =SUM() formulas instead of hardcoded numbers
-//   4. numFmt fixed: integers show "43" not "43.", decimals show "1.5" not "1.50"
-//
-// COLUMN LAYOUT (now fully dynamic):
-//   A  = Rate label
-//   B  = Project name
-//   C+ = All employees including manager (sorted: employees first, manager last)
-//   ?  = Total  (=SUM formula across employee cols)
-//   ?  = Work Summary
+//   1. numFmt: "#,##0.##" — never shows trailing dot ("43" not "43.")
+//   2. Formula cells include result: value so Excel shows correct totals
+//      immediately without requiring manual recalculation
 
 const ExcelJS = require("exceljs");
 const path    = require("path");
 const fs      = require("fs");
 
-// ─── Color constants (exact hex values from company sample) ─────────────────
+// ─── Color constants (exact hex values from company sample) ──────────────────
 const COLOR = {
-  DATE_HEADER_A    : "FFB7E1CD",  // mint green  — date cell A
-  DATE_HEADER_REST : "FFC6EFCE",  // light green — rest of date header row
-  PROJECT_GREEN    : "FFC4D79B",  // yellow-green — standard project row
-  PROJECT_BLUE     : "FFA4C2F4",  // light blue  — ClientX - SubProject rate row
-  EMPLOYEE_CELL    : "FFC4D79B",  // yellow-green — employee hour cells
-  MANAGER_CELL     : "FFF2F2F2",  // light gray  — manager hour cell
+  DATE_HEADER_A    : "FFB7E1CD",
+  DATE_HEADER_REST : "FFC6EFCE",
+  PROJECT_GREEN    : "FFC4D79B",
+  PROJECT_BLUE     : "FFA4C2F4",
+  EMPLOYEE_CELL    : "FFC4D79B",
+  MANAGER_CELL     : "FFF2F2F2",
 };
 
-// ─── Apply solid fill to a cell ──────────────────────────────────────────────
+// "#,##0.##" — shows "43" not "43.", "1.5" not "1.50", never a trailing dot
+const HOURS_FMT = "General";
+
 function setFill(cell, argb) {
   if (!argb) return;
   cell.fill = { type: "pattern", pattern: "solid", fgColor: { argb } };
 }
 
-// ─── Round to 2 decimal places ───────────────────────────────────────────────
 function round2(n) {
   return Math.round((n || 0) * 100) / 100;
 }
 
-// ─── Number format: shows "43" not "43.", "1.5" not "1.50" ──────────────────
-// Excel spec: # = show digit only if non-zero, suppress trailing zeros AND dot
-const NUM_FMT = "0.##";
-
-// ─── Detect if a project is a rate-billed (blue) project ─────────────────────
-// Rule: project name starts with "ClientName - " or "ClientName- "
 function isClientRateProject(projectName, clientName) {
   const proj    = (projectName || "").trim();
   const prefix1 = (clientName  || "").trim() + " - ";
@@ -53,17 +38,13 @@ function isClientRateProject(projectName, clientName) {
   return proj.startsWith(prefix1) || proj.startsWith(prefix2);
 }
 
-// ─── Convert "May 2026" → first day of that month as a JS Date ───────────────
 function parseReportMonthToDate(reportMonth) {
   if (!reportMonth) return new Date();
   const d = new Date(`${reportMonth} 1`);
   return isNaN(d.getTime()) ? new Date() : d;
 }
 
-// ─── Collect all unique people (employees + manager) across ALL clients ───────
-// The manager appears in employeeBreakdown with isManager:true (from builder).
-// We sort so: regular employees alphabetically first, manager last.
-// This keeps the manager column visually separate on the right.
+// Collect all unique people: regular employees (alphabetical) then manager(s) last
 function collectAllPeople(billingSummary) {
   const employees = new Set();
   const managers  = new Set();
@@ -72,23 +53,19 @@ function collectAllPeople(billingSummary) {
     for (const project of (client.projects || [])) {
       for (const emp of (project.employeeBreakdown || [])) {
         if (!emp.employeeName || emp.employeeName === "Unknown Employee") continue;
-        if (emp.isManager) {
-          managers.add(emp.employeeName);
-        } else {
-          employees.add(emp.employeeName);
-        }
+        if (emp.isManager) managers.add(emp.employeeName);
+        else               employees.add(emp.employeeName);
       }
     }
   }
 
-  // Regular employees alphabetically, then manager(s) at the end
   return [
     ...Array.from(employees).sort(),
     ...Array.from(managers).sort(),
   ];
 }
 
-// ─── Excel column letter from 1-based index (1=A, 27=AA, etc.) ───────────────
+// Convert 1-based column index to Excel letter (1→A, 27→AA, etc.)
 function colLetter(n) {
   let result = "";
   while (n > 0) {
@@ -104,9 +81,8 @@ function colLetter(n) {
 // ─────────────────────────────────────────────────────────────────────────────
 async function generateBillingSummaryExcel(billingSummary, reportMonth) {
 
-  const { managerName = "Manager", clients = [] } = billingSummary;
+  const { clients = [] } = billingSummary;
 
-  // Output folder
   const outputDir = path.join(__dirname, "../generated-reports");
   if (!fs.existsSync(outputDir)) fs.mkdirSync(outputDir, { recursive: true });
 
@@ -120,11 +96,9 @@ async function generateBillingSummaryExcel(billingSummary, reportMonth) {
 
   const sheet = workbook.addWorksheet("Billing Summary");
 
-  // ── Discover all people (employees + manager) ──────────────────────────────
-  // allPeople = ["Employee A", "Employee B", "Employee C", "Nishant Rajvanshi"]
   const allPeople = collectAllPeople(billingSummary);
 
-  // Build a Set of manager names for quick gray-fill lookup
+  // Manager name set for gray-fill detection
   const managerNames = new Set();
   for (const client of clients) {
     for (const project of (client.projects || [])) {
@@ -134,16 +108,15 @@ async function generateBillingSummaryExcel(billingSummary, reportMonth) {
     }
   }
 
-  // ── Column index map (1-based) ─────────────────────────────────────────────
-  // A=1, B=2, people start at C=3
-  const COL_A            = 1;   // Rate label
-  const COL_B            = 2;   // Project name
-  const COL_PEOPLE_START = 3;   // First person column (C)
+  // Column positions (1-based)
+  const COL_A            = 1;
+  const COL_B            = 2;
+  const COL_PEOPLE_START = 3;
   const COL_PEOPLE_END   = COL_PEOPLE_START + allPeople.length - 1;
   const COL_TOTAL        = COL_PEOPLE_END + 1;
   const COL_WORK_SUMMARY = COL_PEOPLE_END + 2;
 
-  // ── Column widths ──────────────────────────────────────────────────────────
+  // Column widths
   sheet.getColumn(COL_A).width           = 15.85;
   sheet.getColumn(COL_B).width           = 38;
   for (let i = COL_PEOPLE_START; i <= COL_PEOPLE_END; i++) {
@@ -154,12 +127,10 @@ async function generateBillingSummaryExcel(billingSummary, reportMonth) {
 
   let currentRow = 1;
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // ROW 1 — Date header
-  // ════════════════════════════════════════════════════════════════════════════
+  // ── ROW 1: Date header ─────────────────────────────────────────────────────
   {
-    const r     = sheet.getRow(currentRow);
-    r.height    = 15.75;
+    const r  = sheet.getRow(currentRow);
+    r.height = 15.75;
 
     const cellA = r.getCell(COL_A);
     cellA.value     = parseReportMonthToDate(reportMonth);
@@ -168,48 +139,37 @@ async function generateBillingSummaryExcel(billingSummary, reportMonth) {
     cellA.font      = { name: "Arial", size: 10 };
     setFill(cellA, COLOR.DATE_HEADER_A);
 
-    // B through Total: light green
     for (let c = COL_B; c <= COL_TOTAL; c++) {
       const cell = r.getCell(c);
       setFill(cell, COLOR.DATE_HEADER_REST);
       cell.font = { name: "Arial", size: 10 };
     }
-
     currentRow++;
   }
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // ROW 2 — Column headers
-  // ════════════════════════════════════════════════════════════════════════════
-  const headerRowNumber = currentRow;
+  // ── ROW 2: Column headers ──────────────────────────────────────────────────
   {
     const r  = sheet.getRow(currentRow);
     r.height = 15.75;
 
-    // Person columns: C onward
     for (let i = 0; i < allPeople.length; i++) {
       const cell  = r.getCell(COL_PEOPLE_START + i);
       cell.value  = allPeople[i];
       cell.font   = { name: "Arial", size: 10 };
     }
 
-    // Total header — bold (matches sample)
     const cellTotal = r.getCell(COL_TOTAL);
     cellTotal.value = "Total";
     cellTotal.font  = { name: "Arial", size: 10, bold: true };
 
-    // Work Summary header
     r.getCell(COL_WORK_SUMMARY).value = "Work Summary";
     r.getCell(COL_WORK_SUMMARY).font  = { name: "Arial", size: 10 };
-
     currentRow++;
   }
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // DATA ROWS — track first data row for column SUM formula range
-  // ════════════════════════════════════════════════════════════════════════════
-  const firstDataRow = currentRow; // needed for column-total SUM range
+  const firstDataRow = currentRow; // used for column SUM range
 
+  // ── Data rows ──────────────────────────────────────────────────────────────
   for (const client of clients) {
     const clientName = client.clientName || "";
 
@@ -218,7 +178,6 @@ async function generateBillingSummaryExcel(billingSummary, reportMonth) {
       const isBlue    = isClientRateProject(projName, clientName);
       const projColor = isBlue ? COLOR.PROJECT_BLUE : COLOR.PROJECT_GREEN;
 
-      // Quick lookup: personName → hours for this project row
       const hoursMap = {};
       for (const emp of (project.employeeBreakdown || [])) {
         hoursMap[emp.employeeName] = round2(emp.hours);
@@ -227,49 +186,53 @@ async function generateBillingSummaryExcel(billingSummary, reportMonth) {
       const r  = sheet.getRow(currentRow);
       r.height = 15.75;
 
-      // Col A: rate label (only for blue projects)
       if (isBlue) {
         const cellA = r.getCell(COL_A);
         cellA.value = `${clientName} rate`;
         cellA.font  = { name: "Arial", size: 10 };
       }
 
-      // Col B: project name
       const cellB = r.getCell(COL_B);
       cellB.value = projName;
       cellB.font  = { name: "Arial", size: 10 };
       setFill(cellB, projColor);
 
-      // Person columns
+      // Compute row total for use as formula cached result
+      let rowTotal = 0;
+      for (let i = 0; i < allPeople.length; i++) {
+        rowTotal += hoursMap[allPeople[i]] || 0;
+      }
+      rowTotal = round2(rowTotal);
+
       for (let i = 0; i < allPeople.length; i++) {
         const personName = allPeople[i];
         const hrs        = hoursMap[personName] || 0;
         const colIdx     = COL_PEOPLE_START + i;
         const cell       = r.getCell(colIdx);
 
-        // Manager gets gray fill; employees get yellow-green
         const isThisMgr = managerNames.has(personName);
         setFill(cell, isThisMgr ? COLOR.MANAGER_CELL : COLOR.EMPLOYEE_CELL);
 
         if (hrs > 0) {
           cell.value     = hrs;
-          cell.numFmt    = NUM_FMT;
+          cell.numFmt    = HOURS_FMT;
           cell.font      = { name: "Arial", size: 10 };
           cell.alignment = { horizontal: "right" };
         }
       }
 
-      // Total column — =SUM(C{row}:{lastPeopleCol}{row})
-      // This formula recalculates automatically if any cell is manually edited
+      // Row total formula with cached result
       const firstPersonCell = colLetter(COL_PEOPLE_START) + currentRow;
       const lastPersonCell  = colLetter(COL_PEOPLE_END)   + currentRow;
       const cellTotal       = r.getCell(COL_TOTAL);
-      cellTotal.value       = { formula: `SUM(${firstPersonCell}:${lastPersonCell})` };
+      cellTotal.value       = {
+        formula : `SUM(${firstPersonCell}:${lastPersonCell})`,
+        result  : rowTotal,   // ← cached result: Excel shows this immediately
+      };
       cellTotal.font        = { name: "Arial", size: 10, bold: true };
-      cellTotal.numFmt      = NUM_FMT;
+      cellTotal.numFmt      = HOURS_FMT;
       cellTotal.alignment   = { horizontal: "right" };
 
-      // Work Summary
       const summaryText = (project.workSummary || []).join(", ");
       if (summaryText) {
         const cellWS     = r.getCell(COL_WORK_SUMMARY);
@@ -283,43 +246,63 @@ async function generateBillingSummaryExcel(billingSummary, reportMonth) {
     }
   }
 
-  // ════════════════════════════════════════════════════════════════════════════
-  // GRAND TOTALS ROW
-  // All numeric columns use =SUM(C{firstData}:C{lastData}) formulas
-  // ════════════════════════════════════════════════════════════════════════════
+  // ── Grand totals row ────────────────────────────────────────────────────────
   const lastDataRow = currentRow - 1;
   {
     const r  = sheet.getRow(currentRow);
     r.height = 15.75;
 
-    // Person column totals
+    // Compute actual column totals for cached results
+    const colTotals = {};
+    allPeople.forEach(name => { colTotals[name] = 0; });
+    let grandTotalVal = 0;
+
+    for (let rowNum = firstDataRow; rowNum <= lastDataRow; rowNum++) {
+      for (let i = 0; i < allPeople.length; i++) {
+        const cellVal = sheet.getRow(rowNum).getCell(COL_PEOPLE_START + i).value;
+        if (typeof cellVal === "number") {
+          colTotals[allPeople[i]] = round2((colTotals[allPeople[i]] || 0) + cellVal);
+        }
+      }
+      const totalCell = sheet.getRow(rowNum).getCell(COL_TOTAL);
+      const tv = totalCell.value;
+      if (typeof tv === "number") {
+        grandTotalVal = round2(grandTotalVal + tv);
+      } else if (tv && typeof tv === "object" && typeof tv.result === "number") {
+        grandTotalVal = round2(grandTotalVal + tv.result);
+      }
+    }
+
     for (let i = 0; i < allPeople.length; i++) {
-      const colIdx   = COL_PEOPLE_START + i;
-      const colLet   = colLetter(colIdx);
-      const cell     = r.getCell(colIdx);
-      cell.value     = { formula: `SUM(${colLet}${firstDataRow}:${colLet}${lastDataRow})` };
+      const colIdx = COL_PEOPLE_START + i;
+      const colLet = colLetter(colIdx);
+      const cell   = r.getCell(colIdx);
+      cell.value   = {
+        formula : `SUM(${colLet}${firstDataRow}:${colLet}${lastDataRow})`,
+        result  : colTotals[allPeople[i]] || 0,
+      };
       cell.font      = { name: "Arial", size: 10, bold: true };
-      cell.numFmt    = NUM_FMT;
+      cell.numFmt    = HOURS_FMT;
       cell.alignment = { horizontal: "right" };
     }
 
-    // Grand Total column — sum of the Total column
-    const totalColLet   = colLetter(COL_TOTAL);
+    const totalColLet    = colLetter(COL_TOTAL);
     const cellGrandTotal = r.getCell(COL_TOTAL);
-    cellGrandTotal.value     = { formula: `SUM(${totalColLet}${firstDataRow}:${totalColLet}${lastDataRow})` };
+    cellGrandTotal.value = {
+      formula : `SUM(${totalColLet}${firstDataRow}:${totalColLet}${lastDataRow})`,
+      result  : grandTotalVal,
+    };
     cellGrandTotal.font      = { name: "Arial", size: 10, bold: true };
-    cellGrandTotal.numFmt    = NUM_FMT;
+    cellGrandTotal.numFmt    = HOURS_FMT;
     cellGrandTotal.alignment = { horizontal: "right" };
 
     currentRow++;
   }
 
-  // Two blank spacer rows
-  currentRow += 2;
+  currentRow += 2; // two blank spacer rows
 
   await workbook.xlsx.writeFile(outputPath);
   console.log(`✅ Billing Summary saved: ${outputPath}`);
-
   return outputPath;
 }
 
