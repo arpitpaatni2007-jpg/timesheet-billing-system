@@ -111,7 +111,27 @@ const hours = Number(row.hoursForBilling || 0);
 
     // --- Add hours at every level ---
     task.employees[employeeName].totalHours += hours;
-    task.employees[employeeName].entries.push({ date, hours }); // raw entries
+
+    // Store every field that excelGenerator writes into a data row.
+    // Previously only { date, hours } were kept here, which caused
+    // Project ID, Task/Bug ID, Billing Type, Notes, Created Time, Type,
+    // Project Group, and Milestone to appear blank in the Excel output.
+    // These fields are all present on the clean row from csvProcessor.js.
+    // The grouping keys (projectName, moduleName, taskName, employeeName)
+    // are NOT stored here — excelGenerator reads those from the parent
+    // objects in the hierarchy, not from individual entries.
+    task.employees[employeeName].entries.push({
+      date,                                     // G  Date
+      hours,                                    // H  Hours (For Calculation)
+      projectId   : row.projectId    || "",     // B  Project ID
+      taskId      : row.taskId       || "",     // E  Task / Bug ID
+      billingType : row.billingType  || "",     // I  Billing Type
+      notes       : row.notes        || "",     // J  Notes
+      createdTime : row.createdTime  || "",     // K  Created Time
+      taskType    : row.taskType     || "",     // L  Type
+      projectGroup: row.projectGroup || "",     // M  Project Group
+      milestone   : row.milestone    || "",     // N  Milestone
+    });
 
     task.totalHours     += hours;
     module.totalHours   += hours;
