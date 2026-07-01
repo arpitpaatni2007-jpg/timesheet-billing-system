@@ -8,11 +8,15 @@ import React from "react";
 import { Upload } from "lucide-react";
 import FileInput from "./FileInput";
 
-// MIME types accepted by each input
-const CSV_ACCEPT  = { "text/csv": [".csv"], "application/csv": [".csv"] };
-const XLSX_ACCEPT = {
+// MIME types accepted by the Employee input (CSV only)
+const CSV_ACCEPT = { "text/csv": [".csv"], "application/csv": [".csv"] };
+
+// MIME types accepted by the Manager input (XLSX or CSV — backend now handles both)
+const MANAGER_ACCEPT = {
   "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
   "application/vnd.ms-excel": [".xls"],
+  "text/csv":        [".csv"],
+  "application/csv": [".csv"],
 };
 
 const UploadZone = ({
@@ -62,8 +66,8 @@ const UploadZone = ({
       />
       <FileInput
         label="Manager Hours"
-        description=".XLSX format"
-        accept={XLSX_ACCEPT}
+        description=".CSV / .XLSX format"
+        accept={MANAGER_ACCEPT}
         file={managerFile}
         onChange={setManagerFile}
         onClear={() => setManagerFile(null)}
@@ -97,7 +101,7 @@ const UploadZone = ({
 
       <span style={{ fontSize: "12px", color: "var(--text-tertiary)", marginLeft: "4px" }}>
         {!employeeFile && !managerFile && "No files selected"}
-        {employeeFile && !managerFile && "1 of 2 — add manager XLSX"}
+        {employeeFile && !managerFile && "1 of 2 — add manager CSV or XLSX"}
         {!employeeFile && managerFile && "1 of 2 — add employee CSV"}
         {employeeFile && managerFile && "Both files ready ✓"}
       </span>
