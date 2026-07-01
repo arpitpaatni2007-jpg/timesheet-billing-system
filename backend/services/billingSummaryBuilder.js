@@ -50,23 +50,105 @@ function projectBelongsToClient(projectName, clientName) {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
-// HELPER: Extract all task descriptions from a project's grouped data
-// Used to auto-generate work summary text
+// HELPER: Build the Work Summary / Comments text for one project row
+//         in the Monthly Billing Summary sheet.
+//
+// PREVIOUS LOGIC (weak):
+//   Collected up to 5 unique task *names* from the project hierarchy.
+//   Ignored the actual daily notes employees wrote on each log entry.
+//   Result: showed task titles like "New report - Requirement collection"
+//   instead of what was actually done.
+//
+// NEW LOGIC:
+//   Reads entry.notes — the free-text comments employees write per log entry.
+//   Groups them under their task name so the manager can see what was done
+//   on each task without the comment being out of context.
+//   Falls back to the task name alone if no note was written for a task.
+//
+// OUTPUT FORMAT (one line per task that had meaningful work):
+//   "Task Name: note1; note2; note3. Task Name 2: note4."
+//
+// RULES:
+//   1. Only reads entry.notes (the actual daily comment field from the CSV).
+//   2. Skips blank/dash/generic notes that add no information.
+//   3. Deduplicates: same note text for the same task only appears once.
+//   4. Groups notes under their task name for readability.
+//   5. If a task has no useful notes, falls back to just the task name.
+//   6. Skips tasks named "Unspecified Task".
+//   7. Hard cap: total output ≤ 500 characters so the Excel cell stays usable.
+//   8. Each task group ends with ". " as sentence separator.
 // ─────────────────────────────────────────────────────────────────────────────
 function extractWorkSummary(project) {
-  const tasks = [];
+
+  // Noise values that add no information — filter these out
+  const SKIP_NOTES = new Set(["-", "—", "n/a", "na", "none", "nil", ".", ".."]);
+
+  // Per-task map: { taskName: Set<note> }
+  // We use a Map to preserve task iteration order (module → task order)
+  const taskNotes = new Map();
 
   for (const mod of (project.modules || [])) {
     for (const task of (mod.tasks || [])) {
-      const name = (task.taskName || "").trim();
-      if (name && name !== "Unspecified Task" && !tasks.includes(name)) {
-        tasks.push(name);
+      const taskName = (task.taskName || "").trim();
+
+      // Skip placeholder task names
+      if (!taskName || taskName === "Unspecified Task") continue;
+
+      if (!taskNotes.has(taskName)) {
+        taskNotes.set(taskName, new Set());
+      }
+
+      // Walk every employee's log entries for this task
+      for (const emp of (task.employees || [])) {
+        for (const entry of (emp.entries || [])) {
+          const raw  = (entry.notes || "").trim();
+          const note = raw.replace(/\s+/g, " ");   // collapse internal whitespace
+
+          // Skip blank, single-char, or known-noise values
+          if (!note || note.length < 3) continue;
+          if (SKIP_NOTES.has(note.toLowerCase())) continue;
+
+          taskNotes.get(taskName).add(note);
+        }
       }
     }
   }
 
-  // Return up to 5 unique task names as a summary
-  return tasks.slice(0, 5);
+  // Build one text segment per task
+  const segments = [];
+
+  for (const [taskName, notesSet] of taskNotes) {
+    const notes = Array.from(notesSet);
+
+    if (notes.length === 0) {
+      // No useful notes found — use the task name alone as a fallback
+      segments.push(taskName);
+    } else {
+      // Join notes for this task with semicolons
+      // e.g. "API integration: Built endpoint; Fixed validation bug"
+      segments.push(`${taskName}: ${notes.join("; ")}`);
+    }
+  }
+
+  if (segments.length === 0) return [];
+
+  // Join all task segments with ". " separator and enforce 500-char hard cap
+  // so the Work Summary cell never overflows into an unreadable wall of text.
+  // We truncate at a sentence boundary where possible (last ". " before limit).
+  const CHAR_LIMIT = 500;
+  let full = segments.join(". ");
+
+  if (full.length <= CHAR_LIMIT) {
+    // Return as a single-element array — billingSummaryExcelGenerator joins with ", "
+    // but since we already built a single formatted string, this is intentional.
+    return [full];
+  }
+
+  // Truncate: find the last ". " boundary before the limit
+  const truncated = full.slice(0, CHAR_LIMIT);
+  const lastDot   = truncated.lastIndexOf(". ");
+  const cutAt     = lastDot > 50 ? lastDot + 1 : CHAR_LIMIT; // keep at least 50 chars
+  return [full.slice(0, cutAt).trimEnd() + "…"];
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
