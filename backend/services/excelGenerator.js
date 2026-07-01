@@ -103,17 +103,46 @@ async function generateTimesheetExcel(groupedData, reportMonth) {
 
 // ─────────────────────────────────────────────────────────────────────────────
 // addClientSheet
+//
+// STRUCTURE PER PROJECT (matches manager sample workbook):
+//
+//   [data rows — outline level 3]         ← deepest, collapse to hide raw rows
+//     [Task List subtotal — level 2]      ← SUBTOTAL(9, taskFirst:taskLast)
+//   [Project subtotal — level 1]          ← SUBTOTAL(9, projFirst:projLast)
+//   [blank spacer]
+//   [Client grand total]                  ← SUBTOTAL(9, allDataFirst:allDataLast)
+//
+// WHY SUBTOTAL(9,...) INSTEAD OF SUM():
+//   SUM() counts every row in its range, including rows hidden by outline
+//   collapse. SUBTOTAL(9,...) skips hidden rows, so grand totals stay correct
+//   after the user expands/collapses any group.
+//
+// SORT ORDER: Project Name → Task List → Task → User
+//   The grouper already produces this hierarchy. We respect it here.
+//
+// OUTLINE LEVELS (Excel outline buttons appear on the left):
+//   Level 3 = individual data rows (most granular)
+//   Level 2 = Task List subtotal rows
+//   Level 1 = Project subtotal rows
+//   Level 0 = client grand total (always visible)
 // ─────────────────────────────────────────────────────────────────────────────
 function addClientSheet(workbook, sheetName, clientsOnSheet, reportMonth) {
 
   const sheet = workbook.addWorksheet(sheetName);
 
+  // Excel outline summary rows appear BELOW the detail they summarise.
+  // This property tells Excel that subtotals are below their group of rows,
+  // which is the standard bottom-summary convention used in the sample workbook.
+  sheet.properties.outlineProperties = {
+    summaryBelow : true,   // subtotal row is below the data it summarises
+    summaryRight : false,
+  };
+
   const displayName = clientsOnSheet.length === 1
     ? clientsOnSheet[0].clientName
     : "Other Clients";
 
-  // ── Title rows (1–4) ───────────────────────────────────────────────────────
-  // Merge across all 14 columns (A:N)
+  // ── Title rows (1–4) ─────────────────────────────────────────────────────
   sheet.addRow([`Client Wise – Timesheet Report`]);
   sheet.mergeCells("A1:N1");
   styleTitle(sheet.getRow(1).getCell(1));
@@ -131,61 +160,72 @@ function addClientSheet(workbook, sheetName, clientsOnSheet, reportMonth) {
 
   sheet.addRow([]); // blank spacer row 4
 
-  // ── Column headers (row 5) ────────────────────────────────────────────────
+  // ── Column headers (row 5) ───────────────────────────────────────────────
   const headerRow = sheet.addRow([
-    "Project Name",          // A  col 1
-    "Project ID",            // B  col 2  — blank in data rows
-    "Task List / Module",    // C  col 3
-    "Task / General / Bug",  // D  col 4
-    "Task / Bug ID",         // E  col 5  — blank in data rows
-    "User",                  // F  col 6
-    "Date",                  // G  col 7
-    "Hours (For Calculation)",// H  col 8  ← hours column
-    "Billing Type",          // I  col 9  — blank in data rows
-    "Notes",                 // J  col 10 — blank in data rows
-    "Created Time",          // K  col 11 — blank in data rows
-    "Type",                  // L  col 12 — blank in data rows
-    "Project Group",         // M  col 13 — blank in data rows
-    "Milestone",             // N  col 14 — blank in data rows
+    "Project Name",           // A  col 1
+    "Project ID",             // B  col 2
+    "Task List / Module",     // C  col 3
+    "Task / General / Bug",   // D  col 4
+    "Task / Bug ID",          // E  col 5
+    "User",                   // F  col 6
+    "Date",                   // G  col 7
+    "Hours (For Calculation)", // H  col 8  ← HOURS column
+    "Billing Type",           // I  col 9
+    "Notes",                  // J  col 10
+    "Created Time",           // K  col 11
+    "Type",                   // L  col 12
+    "Project Group",          // M  col 13
+    "Milestone",              // N  col 14
   ]);
   styleHeaderRow(headerRow);
   sheet.views = [{ state: "frozen", ySplit: 5 }];
 
-  // ── Column widths ─────────────────────────────────────────────────────────
-  sheet.getColumn(1).width  = 38;   // A  Project Name
-  sheet.getColumn(2).width  = 14;   // B  Project ID
-  sheet.getColumn(3).width  = 28;   // C  Task List / Module
-  sheet.getColumn(4).width  = 34;   // D  Task / General / Bug
-  sheet.getColumn(5).width  = 14;   // E  Task / Bug ID
-  sheet.getColumn(6).width  = 22;   // F  User
-  sheet.getColumn(7).width  = 14;   // G  Date
-  sheet.getColumn(8).width  = 18;   // H  Hours (For Calculation)
-  sheet.getColumn(9).width  = 14;   // I  Billing Type
-  sheet.getColumn(10).width = 24;   // J  Notes
-  sheet.getColumn(11).width = 18;   // K  Created Time
-  sheet.getColumn(12).width = 10;   // L  Type
-  sheet.getColumn(13).width = 16;   // M  Project Group
-  sheet.getColumn(14).width = 16;   // N  Milestone
+  // ── Column widths ────────────────────────────────────────────────────────
+  sheet.getColumn(1).width  = 38;
+  sheet.getColumn(2).width  = 14;
+  sheet.getColumn(3).width  = 28;
+  sheet.getColumn(4).width  = 34;
+  sheet.getColumn(5).width  = 14;
+  sheet.getColumn(6).width  = 22;
+  sheet.getColumn(7).width  = 14;
+  sheet.getColumn(8).width  = 18;
+  sheet.getColumn(9).width  = 14;
+  sheet.getColumn(10).width = 24;
+  sheet.getColumn(11).width = 18;
+  sheet.getColumn(12).width = 10;
+  sheet.getColumn(13).width = 16;
+  sheet.getColumn(14).width = 16;
 
-  // ── Data rows ─────────────────────────────────────────────────────────────
-  // Each entry in emp.entries[] becomes ONE row.
-  // Project Name, Module, Task, User repeat for every entry of that employee.
-
+  // ── Data + subtotal rows ─────────────────────────────────────────────────
   for (const client of clientsOnSheet) {
 
-    const clientDataRowNumbers = [];
+    // Track every raw data row across all projects for the client grand total.
+    // We only reference the very first and very last data row numbers here;
+    // SUBTOTAL(9,...) over that range correctly skips any subtotal rows
+    // that fall inside it (nested SUBTOTALs are ignored by Excel).
+    let clientFirstDataRow = null;
+    let clientLastDataRow  = null;
+    let clientHoursAcc     = 0; // accumulator for the cached result value only
 
     for (const project of client.projects) {
 
-      const projectDataRowNumbers = [];
+      // Sorted order: Project → Task List (mod) → Task → User
+      // The grouper already maintains this hierarchy, so we iterate in order.
+      let projectFirstDataRow = null;
+      let projectLastDataRow  = null;
+      let projectHoursAcc     = 0;
 
       for (const mod of project.modules) {
+
+        // ── Task List level: collect all data rows in this module ──────────
+        let modFirstDataRow = null;
+        let modLastDataRow  = null;
+        let modHoursAcc     = 0;
+
         for (const task of mod.tasks) {
           for (const emp of task.employees) {
 
-            // Expand each raw entry into its own row.
-            // The fallback handles old grouped data where entries[] may only
-            // have { date, hours } — all extra fields default to empty string.
+            // Expand entries — fallback for old data that only stored {date, hours}
             const entries = (emp.entries && emp.entries.length > 0)
               ? emp.entries
               : [{
@@ -203,84 +243,120 @@ function addClientSheet(workbook, sheetName, clientsOnSheet, reportMonth) {
 
             for (const entry of entries) {
               const dataRow = sheet.addRow([
-                project.projectName,          // A  Project Name
-                entry.projectId    || "",     // B  Project ID
-                mod.moduleName,               // C  Task List / Module
-                task.taskName,                // D  Task / General / Bug
-                entry.taskId       || "",     // E  Task / Bug ID
-                emp.employeeName,             // F  User
-                entry.date         || "",     // G  Date
-                entry.hours,                  // H  Hours (For Calculation)
-                entry.billingType  || "",     // I  Billing Type
-                entry.notes        || "",     // J  Notes
-                entry.createdTime  || "",     // K  Created Time
-                entry.taskType     || "",     // L  Type
-                entry.projectGroup || "",     // M  Project Group
-                entry.milestone    || "",     // N  Milestone
+                project.projectName,          // A
+                entry.projectId    || "",     // B
+                mod.moduleName,               // C
+                task.taskName,                // D
+                entry.taskId       || "",     // E
+                emp.employeeName,             // F
+                entry.date         || "",     // G
+                entry.hours,                  // H
+                entry.billingType  || "",     // I
+                entry.notes        || "",     // J
+                entry.createdTime  || "",     // K
+                entry.taskType     || "",     // L
+                entry.projectGroup || "",     // M
+                entry.milestone    || "",     // N
               ]);
 
               styleDataRow(dataRow);
 
-              projectDataRowNumbers.push(dataRow.number);
-              clientDataRowNumbers.push(dataRow.number);
+              // Outline level 3 = deepest detail rows (can be collapsed)
+              dataRow.outlineLevel = 3;
+
+              const rn = dataRow.number;
+              const h  = typeof entry.hours === "number" ? entry.hours : 0;
+
+              // Track ranges and accumulate hours at all three levels
+              if (modFirstDataRow === null)     modFirstDataRow     = rn;
+              if (projectFirstDataRow === null) projectFirstDataRow = rn;
+              if (clientFirstDataRow === null)  clientFirstDataRow  = rn;
+
+              modLastDataRow     = rn;
+              projectLastDataRow = rn;
+              clientLastDataRow  = rn;
+
+              modHoursAcc     += h;
+              projectHoursAcc += h;
+              clientHoursAcc  += h;
             }
           }
         }
+
+        // ── Task List subtotal row ────────────────────────────────────────
+        // Uses SUBTOTAL(9,...) so it is excluded when a higher-level group
+        // collapses and hides this row — prevents double-counting.
+        if (modFirstDataRow !== null) {
+          const modValues = new Array(14).fill("");
+          modValues[0] = `Total – ${mod.moduleName}`;   // col A label
+
+          // SUBTOTAL(9, H_first:H_last) — function 9 = SUM, ignores hidden rows
+          modValues[HOURS_COL - 1] = {
+            formula : `SUBTOTAL(9,${HOURS_COL_LET}${modFirstDataRow}:${HOURS_COL_LET}${modLastDataRow})`,
+            result  : roundHours(modHoursAcc),
+          };
+
+          const modTotalRow = sheet.addRow(modValues);
+          styleModuleTotalRow(modTotalRow);
+
+          sheet.mergeCells(
+            `A${modTotalRow.number}:${colLetter(MERGE_LABEL_END)}${modTotalRow.number}`
+          );
+
+          // Outline level 2 — visible when project group is expanded
+          modTotalRow.outlineLevel = 2;
+        }
       }
 
-      // ── Project subtotal row ───────────────────────────────────────────────
-      if (projectDataRowNumbers.length > 0) {
-        const pFirst = projectDataRowNumbers[0];
-        const pLast  = projectDataRowNumbers[projectDataRowNumbers.length - 1];
+      // ── Project subtotal row ─────────────────────────────────────────────
+      // Spans all data rows (and module subtotal rows) in this project.
+      // SUBTOTAL(9,...) naturally skips the nested module SUBTOTAL rows.
+      if (projectFirstDataRow !== null) {
+        const projValues = new Array(14).fill("");
+        projValues[0] = `Total – ${project.projectName}`;
 
-        const projectSubtotal = projectDataRowNumbers.reduce((sum, rowNum) => {
-          const cell = sheet.getRow(rowNum).getCell(HOURS_COL);
-          return sum + (typeof cell.value === "number" ? cell.value : 0);
-        }, 0);
-
-        // Build a 14-column row; label in col A, formula in col H, rest blank
-        const totalRowValues = new Array(14).fill("");
-        totalRowValues[0] = `Total – ${project.projectName}`;  // col A (index 0)
-        totalRowValues[HOURS_COL - 1] = {                       // col H (index 7)
-          formula : `SUM(${HOURS_COL_LET}${pFirst}:${HOURS_COL_LET}${pLast})`,
-          result  : roundHours(projectSubtotal),
+        projValues[HOURS_COL - 1] = {
+          formula : `SUBTOTAL(9,${HOURS_COL_LET}${projectFirstDataRow}:${HOURS_COL_LET}${projectLastDataRow})`,
+          result  : roundHours(projectHoursAcc),
         };
 
-        const projectTotalRow = sheet.addRow(totalRowValues);
+        const projectTotalRow = sheet.addRow(projValues);
         styleProjectTotalRow(projectTotalRow);
 
-        // Merge A through G for the label text
         sheet.mergeCells(
           `A${projectTotalRow.number}:${colLetter(MERGE_LABEL_END)}${projectTotalRow.number}`
         );
 
-        sheet.addRow([]); // blank spacer after each project
+        // Outline level 1 — collapses to hide all detail + module subtotals
+        projectTotalRow.outlineLevel = 1;
+
+        sheet.addRow([]); // blank spacer between projects
       }
     }
 
-    // ── Client grand total row ─────────────────────────────────────────────
-    if (clientDataRowNumbers.length > 0) {
-      const cFirst = clientDataRowNumbers[0];
-      const cLast  = clientDataRowNumbers[clientDataRowNumbers.length - 1];
+    // ── Client grand total row ───────────────────────────────────────────────
+    // Spans from the very first to the very last data row of this client.
+    // SUBTOTAL(9,...) skips all nested SUBTOTAL rows inside that range,
+    // so it only sums the raw data rows — giving the correct total regardless
+    // of which outline groups are expanded or collapsed.
+    if (clientFirstDataRow !== null) {
+      const clientValues = new Array(14).fill("");
+      clientValues[0] = `TOTAL BILLABLE HOURS – ${client.clientName.toUpperCase()}`;
 
-      const clientSubtotal = clientDataRowNumbers.reduce((sum, rowNum) => {
-        const cell = sheet.getRow(rowNum).getCell(HOURS_COL);
-        return sum + (typeof cell.value === "number" ? cell.value : 0);
-      }, 0);
-
-      const totalRowValues = new Array(14).fill("");
-      totalRowValues[0] = `TOTAL BILLABLE HOURS – ${client.clientName.toUpperCase()}`;
-      totalRowValues[HOURS_COL - 1] = {
-        formula : `SUM(${HOURS_COL_LET}${cFirst}:${HOURS_COL_LET}${cLast})`,
-        result  : roundHours(clientSubtotal),
+      clientValues[HOURS_COL - 1] = {
+        formula : `SUBTOTAL(9,${HOURS_COL_LET}${clientFirstDataRow}:${HOURS_COL_LET}${clientLastDataRow})`,
+        result  : roundHours(clientHoursAcc),
       };
 
-      const clientTotalRow = sheet.addRow(totalRowValues);
+      const clientTotalRow = sheet.addRow(clientValues);
       styleClientTotalRow(clientTotalRow);
 
       sheet.mergeCells(
         `A${clientTotalRow.number}:${colLetter(MERGE_LABEL_END)}${clientTotalRow.number}`
       );
+
+      // Grand total row is level 0 — always visible, never collapsed
+      // (no outlineLevel assignment needed; default is 0)
 
       if (clientsOnSheet.length > 1) sheet.addRow([]);
     }
@@ -328,6 +404,22 @@ function styleProjectTotalRow(row) {
   row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
     cell.font      = { name: "Arial", bold: true, size: 10, color: { argb: "FF1F3864" } };
     cell.fill      = { type: "pattern", pattern: "solid", fgColor: { argb: "FFDAE3F3" } };
+    cell.border    = allBorders();
+    cell.alignment = { vertical: "middle" };
+    if (colNumber === HOURS_COL) {
+      cell.numFmt    = HOURS_FMT;
+      cell.alignment = { horizontal: "center", vertical: "middle" };
+    }
+  });
+  row.height = 18;
+}
+
+// Task List (module) subtotal — lighter shade than project total, darker than data rows
+// Sits between data rows (level 3) and project total (level 1) visually
+function styleModuleTotalRow(row) {
+  row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
+    cell.font      = { name: "Arial", bold: true, size: 10, color: { argb: "FF1F3864" } };
+    cell.fill      = { type: "pattern", pattern: "solid", fgColor: { argb: "FFE9EFF7" } };
     cell.border    = allBorders();
     cell.alignment = { vertical: "middle" };
     if (colNumber === HOURS_COL) {
