@@ -31,6 +31,14 @@ function round2(n) {
   return Math.round((n || 0) * 100) / 100;
 }
 
+// Round to nearest 15-minute increment (0.25 hr) for displayed Summary totals.
+// Applied only to the Total column cells in the Billing Summary sheet.
+// Internal per-person hours and formula ranges are NOT affected.
+// Examples: 31.32 → 31.25 | 5.72 → 5.75 | 154.83 → 154.75
+function roundTo15Min(n) {
+  return Math.round((n || 0) / 0.25) * 0.25;
+}
+
 function isClientRateProject(projectName, clientName) {
   const proj    = (projectName || "").trim();
   const prefix1 = (clientName  || "").trim() + " - ";
@@ -197,12 +205,15 @@ async function generateBillingSummaryExcel(billingSummary, reportMonth) {
       cellB.font  = { name: "Arial", size: 10 };
       setFill(cellB, projColor);
 
-      // Compute row total for use as formula cached result
+      // Compute row total for use as formula cached result.
+      // round2 gives full precision for internal accumulation.
+      // roundTo15Min is then applied for the displayed Total column value only —
+      // the per-person cells (Employee A, B, C… Manager X) keep their exact hours.
       let rowTotal = 0;
       for (let i = 0; i < allPeople.length; i++) {
         rowTotal += hoursMap[allPeople[i]] || 0;
       }
-      rowTotal = round2(rowTotal);
+      rowTotal = roundTo15Min(round2(rowTotal));
 
       for (let i = 0; i < allPeople.length; i++) {
         const personName = allPeople[i];

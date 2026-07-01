@@ -372,4 +372,23 @@ function roundHours(h) {
   return Math.round((h || 0) * 100) / 100;
 }
 
-module.exports = { generateTimesheetExcel };
+// ─── roundTo15Min ─────────────────────────────────────────────────────────────
+// Rounds decimal hours to the nearest 15-minute increment (0.25 hr).
+//
+// Used ONLY for displayed totals in the Monthly Billing Summary sheet.
+// Do NOT use this on raw internal hours — it would corrupt billing calculations.
+//
+// Examples (per manager feedback):
+//   2h 39m → 2.650 → round(2.650 / 0.25) × 0.25 = round(10.6) × 0.25
+//           = 11 × 0.25 = 2.75  ✅
+//   2h 35m → 2.583 → round(2.583 / 0.25) × 0.25 = round(10.33) × 0.25
+//           = 10 × 0.25 = 2.50  ✅
+//   3h 00m → 3.000 → round(12) × 0.25 = 3.00  (exact values unchanged) ✅
+//
+// Exported so billingSummaryExcelGenerator.js can import it without
+// duplicating this logic.
+function roundTo15Min(h) {
+  return Math.round((h || 0) / 0.25) * 0.25;
+}
+
+module.exports = { generateTimesheetExcel, roundTo15Min };
