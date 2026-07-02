@@ -14,6 +14,8 @@
 const fs      = require("fs");       // Built-in: read files from disk
 const path    = require("path");     // Built-in: work with file paths safely
 const Papa    = require("papaparse"); // PapaParse: robust CSV parser
+const XLSX    = require("xlsx");     // Already installed — used by managerReportParser.js
+                                     // Reused here for .xlsx employee timesheets
 
 
 // ─── Helper Function 1: Clean Actual Cost ────────────────────────────────────
@@ -113,143 +115,151 @@ const isSummaryOrBlankRow = (row) => {
 };
 
 
-// ─── Main Function: processCSV ────────────────────────────────────────────────
-// This is the ONLY function exported from this file.
-// Called by uploadController.js after a file is saved to disk.
+// ─── Loader A: Parse CSV file using PapaParse ────────────────────────────────
+// Returns an array of row objects keyed by column header name.
+// e.g. [{ "User": "Employee A", "Project Name": "Client-A - OMS", ... }, ...]
+
+const loadCsvRows = (filePath) => {
+  const fileContent = fs.readFileSync(filePath, "utf8");
+
+  const parsed = Papa.parse(fileContent, {
+    header         : true,   // First row becomes the column key names
+    skipEmptyLines : true,   // Automatically skip 100% empty lines
+    trimHeaders    : true,   // Remove spaces around column header names
+    dynamicTyping  : false,  // Keep everything as string — we convert manually
+  });
+
+  if (parsed.errors && parsed.errors.length > 0) {
+    console.warn(`⚠️  PapaParse warnings for: ${path.basename(filePath)}`);
+    parsed.errors.forEach(err => console.warn(`   Row ${err.row}: ${err.message}`));
+  }
+
+  return parsed.data; // array of row objects
+};
+
+
+// ─── Loader B: Parse XLSX file using the xlsx library ────────────────────────
+// Converts the first worksheet to the same array-of-objects shape as PapaParse.
+// The xlsx library is already a dependency (used by managerReportParser.js) —
+// no new install needed.
 //
-// @param {string} filePath - Absolute path to the saved CSV file
+// WHY raw:false here?
+//   The employee timesheet stores hours as plain numbers ("3.5", "1", "0.75"),
+//   dates as DD-MM-YYYY strings, and Daily Log as "HH:MM" strings.
+//   raw:false keeps everything as formatted strings, which is what the
+//   existing cleanRow mapping already expects and handles correctly.
+
+const loadXlsxRows = (filePath) => {
+  const workbook  = XLSX.readFile(filePath, { raw: false, cellDates: false });
+  // raw:false    → format cells as display strings (not raw serial numbers)
+  // cellDates:false → keep date cells as strings ("05-05-2026") matching CSV format
+
+  const sheetName = workbook.SheetNames[0]; // always use the first sheet
+  const sheet     = workbook.Sheets[sheetName];
+
+  // sheet_to_json with header:1 returns array-of-arrays; with defval:"" and
+  // no header option it returns array-of-objects keyed by row 1 values — which
+  // is the same shape PapaParse produces with header:true.
+  const rows = XLSX.utils.sheet_to_json(sheet, {
+    defval      : "",     // missing cells become "" instead of undefined
+    raw         : false,  // use formatted strings, not raw numbers
+  });
+
+  console.log(`📊 XLSX employee timesheet: ${rows.length} rows from sheet "${sheetName}"`);
+  return rows; // array of row objects, same shape as PapaParse output
+};
+
+
+// ─── Main Function: processCSV ────────────────────────────────────────────────
+// Accepts both .csv and .xlsx employee timesheet files.
+// Detects the format by file extension, loads the rows with the correct loader,
+// then runs the SAME Steps 5–7 (clean, validate, summarise) for both formats.
+//
+// @param {string} filePath - Absolute path to the saved file (.csv or .xlsx)
 // @returns {object} - { success, totalRows, validRows, skippedRows, data, summary }
 
 const processCSV = (filePath) => {
 
   // ── Step 1: Verify the file actually exists on disk ──────────────────────
   if (!fs.existsSync(filePath)) {
-    // Throw an error — uploadController will catch it
-    throw new Error(`CSV file not found at path: ${filePath}`);
+    throw new Error(`File not found at path: ${filePath}`);
   }
 
-  // ── Step 2: Read the raw file content from disk ───────────────────────────
-  const fileContent = fs.readFileSync(filePath, "utf8");
-  // readFileSync = read entire file at once (synchronous)
-  // "utf8" = interpret bytes as readable text (not binary)
+  // ── Step 2: Detect format and load rows ───────────────────────────────────
+  // path.extname returns ".csv" or ".xlsx" (lowercase after .toLowerCase())
+  const ext  = path.extname(filePath).toLowerCase();
+  let   rows; // will be array of row objects keyed by column header
 
-  // ── Step 3: Parse CSV using PapaParse ─────────────────────────────────────
-  const parsed = Papa.parse(fileContent, {
-    header         : true,   // First row becomes the column key names
-    skipEmptyLines : true,   // Automatically skip 100% empty lines
-    trimHeaders    : true,   // Remove spaces around column header names
-    dynamicTyping  : false,  // Keep everything as string — we'll convert manually
-    // Why false? Because "01:00" would become 1 and "CW-4" might get mangled
-  });
-  // parsed.data  = array of row objects (one object per row)
-  // parsed.errors = any parse errors PapaParse found
-  // parsed.meta   = info about the file (delimiter, line endings, etc.)
-
-
-  // ── Step 4: Log any parse warnings (not fatal, just informational) ────────
-  if (parsed.errors && parsed.errors.length > 0) {
-    console.warn(`⚠️  PapaParse warnings for file: ${path.basename(filePath)}`);
-    parsed.errors.forEach(err => {
-      console.warn(`   Row ${err.row}: ${err.message}`); // Print each warning
-    });
+  if (ext === ".xlsx" || ext === ".xls") {
+    rows = loadXlsxRows(filePath);
+    console.log(`📊 Employee timesheet detected as XLSX (${path.basename(filePath)})`);
+  } else {
+    // Default: treat as CSV (covers .csv and any unrecognised extension)
+    rows = loadCsvRows(filePath);
+    console.log(`📄 Employee timesheet detected as CSV (${path.basename(filePath)})`);
   }
+
+  if (!rows || rows.length === 0) {
+    throw new Error("Employee timesheet file appears empty — no data rows found.");
+  }
+
+  // ── Steps 3–4 (CSV-only): already handled inside loadCsvRows ─────────────
+  // PapaParse warnings are logged there. XLSX loader logs its own row count.
 
   // ── Step 5: Process each row — clean, validate, transform ────────────────
-  const validRows   = []; // Rows that passed validation
-  let   skippedRows = 0;  // Count of rows we skipped (summary/blank)
+  // THIS BLOCK IS IDENTICAL FOR BOTH CSV AND XLSX.
+  // Both loaders produce the same shape: { "User": "...", "Project Name": "...", ... }
+  const validRows   = [];
+  let   skippedRows = 0;
 
-  parsed.data.forEach((row, index) => {
-    // index = row position (0-based) in the array
-
-    // Skip summary rows and blank rows
+  rows.forEach((row, index) => {
     if (isSummaryOrBlankRow(row)) {
       skippedRows++;
-      return; // "return" inside forEach = skip to next row (like "continue")
+      return;
     }
 
-    // Build a clean, structured object for this row
-    // Each key name is camelCase for easy use in JavaScript/React
     const cleanRow = {
-
-      // ── Identity ──────────────────────────────────────────────────────────
       user          : row["User"]?.trim() || "",
-      // "?." is optional chaining — safe if row["User"] is undefined
-      // "|| ''" gives empty string instead of undefined
-
       email         : row["Log User Mailid"]?.trim() || "",
       role          : row["Role"]?.trim() || "",
       addedBy       : row["Added By"]?.trim() || "",
 
-      // ── Task Info ─────────────────────────────────────────────────────────
       taskId        : row["Task/Bug ID"]?.trim() || "",
       taskName      : row["Task/General/Bug"]?.trim() || "",
-      taskType      : row["Type"]?.trim() || "",         // "task" or "issue"
+      taskType      : row["Type"]?.trim() || "",
 
-      // ── Project Info ──────────────────────────────────────────────────────
       projectName   : row["Project Name"]?.trim() || "",
       projectId     : row["Project ID"]?.trim() || "",
-      projectGroup  : row["Project Group"]?.trim() || "", // "Maintenance" / "Development"
+      projectGroup  : row["Project Group"]?.trim() || "",
       taskModule    : row["Task List/Module"]?.trim() || "",
       milestone     : row["milestone"]?.trim() === "None" ? null : row["milestone"]?.trim(),
-      // Convert the string "None" → actual null value
 
-      // ── Time & Billing ────────────────────────────────────────────────────
       date              : parseDate(row["Date"]),
-      // "05-05-2026" → "2026-05-05"
-
       dailyLog          : row["Daily Log"]?.trim() || "",
-      // Keep the original "HH:MM" string (e.g. "03:30")
-
       dailyLogMinutes   : parseTimeToMinutes(row["Daily Log"]),
-      // Also store as minutes: 210
-
       hoursForBilling   : parseFloat(row["Hours(For Calculation)"]) || 0,
-      // The reliable decimal hours field: "3.5" → 3.5
-      // || 0 means: if parseFloat returns NaN, default to 0
-
       billingType       : row["Billing Type"]?.trim() || "",
-      // "Billable" or "Non-Billable"
-
       actualCost        : parseActualCost(row["Actual Cost"]),
-      // "₹ 3,000.00" → 3000  |  "-" → null
 
-      // ── Notes ─────────────────────────────────────────────────────────────
       notes         : row["Notes"]?.trim() || "",
       timePeriod    : row["Time Period"]?.trim() === "-" ? null : row["Time Period"]?.trim(),
       fromTo        : row["From - To"]?.trim() === "-" ? null : row["From - To"]?.trim(),
       timerNotes    : row["Timer Notes"]?.trim() === "-" ? null : row["Timer Notes"]?.trim(),
 
-      // ── Metadata ──────────────────────────────────────────────────────────
       createdTime   : row["Created Time"]?.trim() || "",
-      // Keep as-is: "05-05-2026 18:02"
-
       _rowIndex     : index + 2,
-      // +2 because: index is 0-based, plus header row = actual CSV line number
-      // Useful for debugging: "error on row 5" matches row 5 in Excel
     };
 
-    validRows.push(cleanRow); // Add this cleaned row to our results array
+    validRows.push(cleanRow);
   });
 
 
   // ── Step 6: Build a Summary object ───────────────────────────────────────
-  // Quick stats about the parsed file — useful for the frontend dashboard
-
-  // Get all unique employee names
-  const uniqueUsers = [...new Set(validRows.map(r => r.user))];
-  // new Set() removes duplicates. Spread [...] converts it back to array
-
-  // Get all unique projects
+  const uniqueUsers   = [...new Set(validRows.map(r => r.user))];
   const uniqueProjects = [...new Set(validRows.map(r => r.projectName))];
-
-  // Sum up all billing hours
   const totalBillingHours = validRows.reduce((sum, r) => sum + r.hoursForBilling, 0);
-  // reduce = loop through array keeping a running total
-  // sum starts at 0, adds hoursForBilling from each row
-
-  // Count billable vs non-billable rows
-  const billableCount    = validRows.filter(r => r.billingType === "Billable").length;
-  const nonBillableCount = validRows.filter(r => r.billingType !== "Billable").length;
+  const billableCount     = validRows.filter(r => r.billingType === "Billable").length;
+  const nonBillableCount  = validRows.filter(r => r.billingType !== "Billable").length;
 
   const summary = {
     totalEmployees    : uniqueUsers.length,
@@ -257,8 +267,6 @@ const processCSV = (filePath) => {
     totalProjects     : uniqueProjects.length,
     projects          : uniqueProjects,
     totalBillingHours : parseFloat(totalBillingHours.toFixed(2)),
-    // toFixed(2) = round to 2 decimal places → "546.08"
-    // parseFloat converts it back from string to number
     billableEntries   : billableCount,
     nonBillableEntries: nonBillableCount,
   };
@@ -267,11 +275,11 @@ const processCSV = (filePath) => {
   // ── Step 7: Return everything ─────────────────────────────────────────────
   return {
     success     : true,
-    totalRows   : parsed.data.length,  // Total rows PapaParse found
-    validRows   : validRows.length,    // Rows with real data
-    skippedRows : skippedRows,         // Summary/blank rows ignored
-    summary     : summary,             // Quick stats
-    data        : validRows,           // The actual cleaned JSON array
+    totalRows   : rows.length,
+    validRows   : validRows.length,
+    skippedRows : skippedRows,
+    summary     : summary,
+    data        : validRows,
   };
 
 };

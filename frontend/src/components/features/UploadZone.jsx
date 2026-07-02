@@ -8,8 +8,13 @@ import React from "react";
 import { Upload } from "lucide-react";
 import FileInput from "./FileInput";
 
-// MIME types accepted by the Employee input (CSV only)
-const CSV_ACCEPT = { "text/csv": [".csv"], "application/csv": [".csv"] };
+// MIME types accepted by the Employee input (CSV or XLSX — backend now handles both)
+const CSV_ACCEPT = {
+  "text/csv":        [".csv"],
+  "application/csv": [".csv"],
+  "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet": [".xlsx"],
+  "application/vnd.ms-excel": [".xls"],
+};
 
 // MIME types accepted by the Manager input (XLSX or CSV — backend now handles both)
 const MANAGER_ACCEPT = {
@@ -58,7 +63,7 @@ const UploadZone = ({
     }}>
       <FileInput
         label="Employee Timesheet"
-        description=".CSV format"
+        description=".CSV / .XLSX format"
         accept={CSV_ACCEPT}
         file={employeeFile}
         onChange={setEmployeeFile}
