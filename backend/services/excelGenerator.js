@@ -387,6 +387,8 @@ function styleHeaderRow(row) {
   row.height = 20;
 }
 
+const DATE_COL = 7; // column G — Date
+
 function styleDataRow(row) {
   row.eachCell({ includeEmpty: true }, (cell, colNumber) => {
     cell.font      = { name: "Arial", size: 10 };
@@ -395,6 +397,12 @@ function styleDataRow(row) {
     if (colNumber === HOURS_COL) {
       cell.numFmt    = HOURS_FMT;
       cell.alignment = { horizontal: "center", vertical: "middle" };
+    }
+    if (colNumber === DATE_COL) {
+      // ExcelJS auto-converts "YYYY-MM-DD" strings to Date serial numbers.
+      // numFmt "@" forces the cell to be treated as text, preserving the
+      // date string exactly as written (e.g. "2026-06-09").
+      cell.numFmt = "@";
     }
   });
   row.height = 18;

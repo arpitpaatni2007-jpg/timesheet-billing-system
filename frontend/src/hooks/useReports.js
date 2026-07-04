@@ -48,8 +48,8 @@ const useReports = () => {
   // Returns JSON stats only. Does NOT generate Excel files.
   // The download buttons appear separately after downloadExcel() succeeds.
   const generateSummary = useCallback(async (employeeFile, managerFile) => {
-    if (!employeeFile || !managerFile) {
-      toast.error("Please upload both files first.");
+    if (!employeeFile) {
+      toast.error("Please upload the employee timesheet first.");
       return;
     }
  
@@ -82,8 +82,8 @@ const useReports = () => {
   //   - The billing summary file is downloaded immediately (primary deliverable).
   //   - Both entries are added to history.
   const downloadExcel = useCallback(async (employeeFile, managerFile) => {
-    if (!employeeFile || !managerFile) {
-      toast.error("Please upload both files first.");
+    if (!employeeFile) {
+      toast.error("Please upload the employee timesheet first.");
       return;
     }
  
@@ -128,7 +128,7 @@ const useReports = () => {
         filename:     billingName,
         generatedAt:  now,
         employeeFile: employeeFile.name,
-        managerFile:  managerFile.name,
+        managerFile:  managerFile?.name ?? null,
         size:         0,
       });
       if (timesheetName) {
@@ -137,7 +137,7 @@ const useReports = () => {
           filename:     timesheetName,
           generatedAt:  now,
           employeeFile: employeeFile.name,
-          managerFile:  managerFile.name,
+          managerFile:  managerFile?.name ?? null,
           size:         0,
         });
       }
@@ -166,4 +166,3 @@ const useReports = () => {
 };
  
 export default useReports;
- 

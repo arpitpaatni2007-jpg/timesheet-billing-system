@@ -176,9 +176,11 @@ const ReportHistory = ({ onDownload }) => {
                       <span style={{ fontSize: "12px", color: "var(--text-secondary)" }}>
                         {truncate(report.employeeFile, 24)}
                       </span>
-                      <span style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
-                        {truncate(report.managerFile, 24)}
-                      </span>
+                    <span style={{ fontSize: "11px", color: "var(--text-tertiary)" }}>
+  {report.managerFile
+    ? truncate(report.managerFile, 24)
+    : "No manager file"}
+</span>
                     </div>
                   </td>
 

@@ -21,8 +21,8 @@ const useUpload = () => {
     setManagerFile(null);
   }, []);
 
-  // isReady — both files must be present before any API call makes sense
-  const isReady = Boolean(employeeFile && managerFile);
+  // isReady — employee CSV is required; manager file is optional
+  const isReady = Boolean(employeeFile);
 
   return {
     employeeFile,

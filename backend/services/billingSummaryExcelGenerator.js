@@ -232,14 +232,23 @@ async function generateBillingSummaryExcel(billingSummary, reportMonth) {
         }
       }
 
-      // Row total formula with cached result
-      const firstPersonCell = colLetter(COL_PEOPLE_START) + currentRow;
-      const lastPersonCell  = colLetter(COL_PEOPLE_END)   + currentRow;
-      const cellTotal       = r.getCell(COL_TOTAL);
-      cellTotal.value       = {
-        formula : `SUM(${firstPersonCell}:${lastPersonCell})`,
-        result  : rowTotal,   // ← cached result: Excel shows this immediately
-      };
+      // Row Total cell — written as a PLAIN NUMBER, not a formula.
+      //
+      // WHY NOT { formula, result }:
+      //   ExcelJS supports writing { formula: "SUM(...)", result: roundedValue }.
+      //   However, Excel recalculates the SUM formula on open and replaces the
+      //   cached result with the raw sum of per-person cells.
+      //   Per-person cells hold round2 values (e.g. 15.08), not 15-min-rounded
+      //   values, so the formula produces the unrounded total (15.08) and
+      //   discards the rounded cached result (15.00).
+      //   This only manifests when per-person hours are NOT already multiples
+      //   of 0.25 — which is why only Dr Banerjee rows were affected.
+      //
+      // FIX: write a plain number. Excel cannot recalculate a plain number.
+      //   The grand total SUM formula (bottom row) sums these plain values,
+      //   which are already rounded, so the grand total is also correct.
+      const cellTotal     = r.getCell(COL_TOTAL);
+      cellTotal.value     = rowTotal;   // plain rounded number — not overrideable
       cellTotal.font        = { name: "Arial", size: 10, bold: true };
       cellTotal.numFmt      = HOURS_FMT;
       cellTotal.alignment   = { horizontal: "right" };
@@ -290,7 +299,7 @@ async function generateBillingSummaryExcel(billingSummary, reportMonth) {
       const cell   = r.getCell(colIdx);
       cell.value   = {
         formula : `SUM(${colLet}${firstDataRow}:${colLet}${lastDataRow})`,
-        result  : colTotals[allPeople[i]] || 0,
+        result  : roundTo15Min(colTotals[allPeople[i]] || 0),  // ← round to 15 min
       };
       cell.font      = { name: "Arial", size: 10, bold: true };
       cell.numFmt    = HOURS_FMT;
@@ -301,7 +310,7 @@ async function generateBillingSummaryExcel(billingSummary, reportMonth) {
     const cellGrandTotal = r.getCell(COL_TOTAL);
     cellGrandTotal.value = {
       formula : `SUM(${totalColLet}${firstDataRow}:${totalColLet}${lastDataRow})`,
-      result  : grandTotalVal,
+      result  : roundTo15Min(grandTotalVal),  // ← round to 15 min
     };
     cellGrandTotal.font      = { name: "Arial", size: 10, bold: true };
     cellGrandTotal.numFmt    = HOURS_FMT;

@@ -66,9 +66,7 @@ const generateBillingSummary = async (req, res) => {
     if (!timesheetFile) {
       return res.status(400).json({ success: false, error: 'Send employee CSV as "timesheetCsv"' });
     }
-    if (!managerFile) {
-      return res.status(400).json({ success: false, error: 'Send manager Excel as "managerReport"' });
-    }
+    // managerFile is optional — if absent, manager hours are skipped
     let reportMonth = req.body.reportMonth;
     if (!reportMonth) {
       const now = new Date();
@@ -79,11 +77,11 @@ const generateBillingSummary = async (req, res) => {
       return res.status(400).json({ success: false, error: "Employee CSV is empty or invalid" });
     }
     const groupedData    = groupByClient(parsedResult.data);
-    const managerData    = parseManagerReport(managerFile.path);
+    const managerData    = managerFile ? parseManagerReport(managerFile.path) : null;
     const billingSummary = buildBillingSummary(groupedData, managerData, reportMonth);
     return res.status(200).json({
       success: true, reportPeriod: reportMonth,
-      managerName: managerData.managerName,
+      managerName: managerData?.managerName ?? "N/A",
       totalClients: billingSummary.clients.length,
       grandTotal: billingSummary.grandTotal,
       summary: billingSummary,
@@ -130,12 +128,7 @@ const generateBillingSummaryExcelReport = async (req, res) => {
         error: 'Send employee CSV with field name "timesheetCsv"'
       });
     }
-    if (!managerFile) {
-      return res.status(400).json({
-        success: false,
-        error: 'Send manager Excel with field name "managerReport"'
-      });
-    }
+    // managerFile is optional — if absent, manager hours are skipped
 
     let reportMonth = req.body.reportMonth;
     if (!reportMonth) {
@@ -160,8 +153,8 @@ const generateBillingSummaryExcelReport = async (req, res) => {
     // This is the intermediate verification file the manager reviews first.
     const timesheetPath = await generateTimesheetExcel(groupedData, reportMonth);
 
-    // ── Step 4: Parse manager report and build billing summary ────────────────
-    const managerData    = parseManagerReport(managerFile.path);
+    // ── Step 4: Parse manager report (if provided) and build billing summary ───
+    const managerData    = managerFile ? parseManagerReport(managerFile.path) : null;
     const billingSummary = buildBillingSummary(groupedData, managerData, reportMonth);
 
     // ── Step 5: Generate File 2 — Monthly Billing Summary workbook ────────────

@@ -25,10 +25,16 @@ export const formatDate = (date) => {
   });
 };
 
-export const truncate = (text = "", length = 50) => {
-  if (text.length <= length) {
-    return text;
+export const truncate = (text, maxLength = 30) => {
+  // Handle null, undefined or empty values
+  if (text === null || text === undefined) {
+    return "";
   }
 
-  return text.substring(0, length) + "...";
+  // Convert non-string values safely
+  text = String(text);
+
+  return text.length > maxLength
+    ? text.slice(0, maxLength) + "..."
+    : text;
 };
