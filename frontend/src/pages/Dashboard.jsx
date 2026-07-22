@@ -12,7 +12,7 @@ import ClientSheetConfig from "../components/features/ClientSheetConfig"; // ←
 import StatsPanel from "../components/features/StatsPanel";
 import ReportStatus from "../components/features/ReportStatus";
 import ReportHistory from "../components/features/ReportHistory";
-import { downloadReport, triggerBrowserDownload } from "../api/reports";
+import { triggerBrowserDownload } from "../api/reports";
 import toast from "react-hot-toast";
 
 const deriveStatus = ({ isReady, isGenerating, isDownloading, summaryData, error }) => {
@@ -54,16 +54,16 @@ const Dashboard = () => {
     triggerBrowserDownload(reports.timesheetReportName);
   }, [reports.timesheetReportName]);
 
-  const handleHistoryDownload = useCallback(async (filename) => {
-    const toastId = toast.loading("Fetching report...");
-    try {
-      const blob = await downloadReport(filename);
-      triggerBrowserDownload(blob, filename);
-      toast.success("Downloaded!", { id: toastId });
-    } catch (err) {
-      toast.error(`Download failed: ${err.message}`, { id: toastId });
-    }
-  }, []);
+const handleHistoryDownload = useCallback((filename) => {
+  const toastId = toast.loading("Preparing download...");
+
+  try {
+    triggerBrowserDownload(filename);
+    toast.success("Download started!", { id: toastId });
+  } catch (err) {
+    toast.error(`Download failed: ${err.message}`, { id: toastId });
+  }
+}, []);
 
   return (
     <main style={{
